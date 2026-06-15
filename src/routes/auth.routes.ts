@@ -1,67 +1,64 @@
-import express, { Router, Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
+import { Router, Request, Response, NextFunction } from 'express';
 import { AppError } from '../middleware/errorHandler';
+import { AuthService } from '../services/auth/authService';
 
-const router: Router = express.Router();
+const router = Router();
+const authService = new AuthService();
 
-interface LoginRequest {
-  email: string;
-  password: string;
+// Middleware to verify token
+export function verifyToken(req: Request, res: Response, next: NextFunction) {
+  const token = req.headers.authorization?.split(' ')[1];
+
+  if (!token) {
+    throw new AppError(401, 'No token provided');
+  }
+
+  const payload = authService.verifyToken(token);
+  if (!payload) {
+    throw new AppError(401, 'Invalid token');
+  }
+
+  (req as any).userId = payload.userId;
+  (req as any).email = payload.email;
+  next();
 }
 
-interface SignupRequest {
-  email: string;
-  name: string;
-  password: string;
-}
-
-// TODO: Implement actual database queries
-
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, password } = req.body as LoginRequest;
+    const { email, password } = req.body;
 
     if (!email || !password) {
       throw new AppError(400, 'Email and password are required');
     }
 
-    // TODO: Query user from database
-    // const user = await db.query('SELECT * FROM users WHERE email = $1', [email]);
-
-    // TODO: Verify password
-    // const isValid = await bcrypt.compare(password, user.password_hash);
-
-    // TODO: Generate JWT token
-    const token = jwt.sign(
-      { email, userId: 'placeholder' },
-      process.env.JWT_SECRET || 'secret',
-      { expiresIn: process.env.JWT_EXPIRATION || '7d' }
-    );
-
-    res.json({ token, user: { email } });
+    const result = await authService.login({ email, password });
+    res.json(result);
   } catch (error) {
-    if (error instanceof AppError) throw error;
-    throw new AppError(500, 'Login failed');
+    next(error);
   }
 });
 
-router.post('/signup', async (req: Request, res: Response) => {
+router.post('/signup', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, name, password } = req.body as SignupRequest;
+    const { email, name, password } = req.body;
 
     if (!email || !name || !password) {
       throw new AppError(400, 'Email, name, and password are required');
     }
 
-    // TODO: Check if user exists
-    // TODO: Hash password
-    // TODO: Store user in database
-
-    res.status(201).json({ message: 'User created successfully' });
+    const user = await authService.signup({ email, name, password });
+    res.status(201).json({ message: 'User created successfully', user });
   } catch (error) {
-    if (error instanceof AppError) throw error;
-    throw new AppError(500, 'Signup failed');
+    next(error);
+  }
+});
+
+router.get('/profile', verifyToken, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await authService.getUserById((req as any).userId);
+    res.json(user);
+  } catch (error) {
+    next(error);
   }
 });
 
